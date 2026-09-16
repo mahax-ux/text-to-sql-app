@@ -2,10 +2,10 @@ import os
 import sys
 import uuid
 import traceback
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 try:
     from src.state import (
@@ -23,21 +23,16 @@ except Exception as e:
 
 app = FastAPI(title="Text-to-SQL Clarification Engine API")
 
-# Enable CORS for local dev and your Vercel frontend
+# Enable CORS for local dev and deployed frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://text-to-sql-app.vercel.app",
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "*",  # Keeps requests open across deploy preview domains
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# In-memory store for active conversational sessions
+# In-memory session cache
 sessions: Dict[str, EngineSessionState] = {}
 
 # Initialize engine components
@@ -47,12 +42,36 @@ compiler = SQLCompiler()
 
 # Request / Response Schemas
 class QueryRequest(BaseModel):
-    query: str
+    query: Optional[str] = None
+    user_query: Optional[str] = None
+    question: Optional[str] = None
+    prompt: Optional[str] = None
+    text: Optional[str] = None
+
+    @model_validator(mode="after")
+    def resolve_query_field(self):
+        chosen = self.query or self.user_query or self.question or self.prompt or self.text
+        if not chosen:
+            raise ValueError("A query string must be provided (accepted keys: query, user_query, question, prompt, text).")
+        self.query = chosen.strip()
+        return self
 
 
 class ClarificationAnswer(BaseModel):
-    term: str
-    selected_option_id: str
+    term: Optional[str] = None
+    ambiguity_type: Optional[str] = None
+    selected_option_id: Optional[str] = None
+    option_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def resolve_ids(self):
+        chosen_id = self.selected_option_id or self.option_id
+        if not chosen_id:
+            raise ValueError("An option ID must be provided.")
+        self.selected_option_id = chosen_id
+        if not self.term:
+            self.term = ""
+        return self
 
 
 class ClarifyRequest(BaseModel):
