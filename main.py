@@ -2,10 +2,12 @@ import os
 import sys
 import uuid
 import traceback
-from typing import Dict, List, Optional, Any
-from fastapi import FastAPI, HTTPException
+from typing import Dict, Any, List, Optional
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, model_validator
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     from src.state import (
@@ -23,7 +25,7 @@ except Exception as e:
 
 app = FastAPI(title="Text-to-SQL Clarification Engine API")
 
-# Enable CORS for local dev and deployed frontend
+# Enable permissive CORS for local testing and deployed frontends
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -32,72 +34,60 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory session cache
+# In-memory session store
 sessions: Dict[str, EngineSessionState] = {}
 
-# Initialize engine components
+# Initialize engine services
 detector = AmbiguityDetector()
 compiler = SQLCompiler()
 
 
-# Request / Response Schemas
-class QueryRequest(BaseModel):
-    query: Optional[str] = None
-    user_query: Optional[str] = None
-    question: Optional[str] = None
-    prompt: Optional[str] = None
-    text: Optional[str] = None
-
-    @model_validator(mode="after")
-    def resolve_query_field(self):
-        chosen = self.query or self.user_query or self.question or self.prompt or self.text
-        if not chosen:
-            raise ValueError("A query string must be provided (accepted keys: query, user_query, question, prompt, text).")
-        self.query = chosen.strip()
-        return self
-
-
-class ClarificationAnswer(BaseModel):
-    term: Optional[str] = None
-    ambiguity_type: Optional[str] = None
-    selected_option_id: Optional[str] = None
-    option_id: Optional[str] = None
-
-    @model_validator(mode="after")
-    def resolve_ids(self):
-        chosen_id = self.selected_option_id or self.option_id
-        if not chosen_id:
-            raise ValueError("An option ID must be provided.")
-        self.selected_option_id = chosen_id
-        if not self.term:
-            self.term = ""
-        return self
-
-
-class ClarifyRequest(BaseModel):
-    session_id: str
-    answers: List[ClarificationAnswer]
-
-
 @app.get("/")
-def health_check():
+def root():
     return {"status": "healthy", "service": "text-to-sql-engine"}
 
 
 @app.post("/api/query")
-def submit_query(req: QueryRequest):
-    """Initial query entry point: analyzes prompt for ambiguities."""
+async def submit_query(request: Request):
+    """Dynamically accepts any incoming JSON payload structure from the frontend."""
     try:
-        session_id = str(uuid.uuid4())
-        session_state = EngineSessionState(
-            session_id=session_id,
-            raw_query=req.query
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body received.")
+
+    # Extract user input regardless of which key the frontend uses
+    raw_text = (
+        data.get("query")
+        or data.get("user_query")
+        or data.get("question")
+        or data.get("prompt")
+        or data.get("text")
+        or data.get("sql_query")
+        or ""
+    )
+
+    if isinstance(raw_text, str):
+        raw_text = raw_text.strip()
+
+    if not raw_text:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No query string found. Received payload keys: {list(data.keys())}"
         )
 
+    session_id = data.get("session_id") or str(uuid.uuid4())
+
+    try:
+        session_state = EngineSessionState(
+            session_id=session_id,
+            raw_query=raw_text
+        )
+
+        # Step 1: Detect ambiguities
         session_state = detector.analyze(session_state)
         sessions[session_id] = session_state
 
-        # If no ambiguities, compile and execute immediately
+        # Step 2: Auto-compile if query is completely unambiguous
         if session_state.status == ExecutionStatus.READY_TO_GENERATE:
             session_state = compiler.compile_and_execute(session_state)
             sessions[session_id] = session_state
@@ -106,35 +96,52 @@ def submit_query(req: QueryRequest):
 
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Engine processing error: {str(e)}")
 
 
 @app.post("/api/clarify")
-def clarify_query(req: ClarifyRequest):
-    """Resolves selected options and generates the final SQL."""
-    session_state = sessions.get(req.session_id)
-    if not session_state:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def clarify_query(request: Request):
+    """Dynamically parses clarification answers and compiles the final query."""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body received.")
+
+    session_id = data.get("session_id")
+    if not session_id or session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session expired or not found.")
+
+    raw_answers = data.get("answers", [])
+    resolved_responses: List[UserClarificationResponse] = []
+
+    for item in raw_answers:
+        if isinstance(item, dict):
+            term = item.get("term", "")
+            option_id = item.get("selected_option_id") or item.get("option_id") or item.get("id") or ""
+            if option_id:
+                resolved_responses.append(
+                    UserClarificationResponse(
+                        term=term,
+                        selected_option_id=option_id
+                    )
+                )
 
     try:
-        session_state.resolved_clarifications = [
-            UserClarificationResponse(
-                term=ans.term,
-                selected_option_id=ans.selected_option_id
-            )
-            for ans in req.answers
-        ]
+        session_state = sessions[session_id]
+        session_state.resolved_clarifications = resolved_responses
 
+        # Compile and run SQL
         session_state = compiler.compile_and_execute(session_state)
-        sessions[req.session_id] = session_state
+        sessions[session_id] = session_state
 
         return session_state.model_dump()
 
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Compilation error: {str(e)}")
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
