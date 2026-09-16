@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Background glow circle -->
+  <rect width="32" height="32" rx="8" fill="#0b120e" />
+  <rect width="32" height="32" rx="8" stroke="#00ff80" stroke-width="1.5" stroke-opacity="0.4" />
+  
+  <!-- Database Cylinder Disks -->
+  <ellipse cx="14" cy="10" rx="7" ry="2.8" stroke="#00ff80" stroke-width="1.8" fill="#13241a" />
+  
+  <path d="M7 10v5.5c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8V10" stroke="#a1a1aa" stroke-width="1.8" stroke-linecap="round" />
+  <path d="M7 15.5v5.5c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8V15.5" stroke="#a1a1aa" stroke-width="1.8" stroke-linecap="round" />
+  
+  <!-- AI Sparkle / Star in top-right -->
+  <path d="M23 4.5l1 2.8 2.8 1-2.8 1-1 2.8-1-2.8-2.8-1 2.8-1 1-2.8z" fill="#00ff80" />
+</svg>

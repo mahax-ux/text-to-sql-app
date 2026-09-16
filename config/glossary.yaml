@@ -1,0 +1,35 @@
+terms:
+  revenue:
+    type: METRIC_AMBIGUITY
+    description: "Monetary income from orders"
+    options:
+      - id: "net_revenue"
+        label: "Net completed revenue (Status: 'paid' or 'fulfilled')"
+        filter: "status IN ('paid', 'fulfilled')"
+        expression: "SUM(total_amount)"
+      - id: "gross_revenue"
+        label: "Gross volume (All orders regardless of status)"
+        filter: "1=1"
+        expression: "SUM(total_amount)"
+
+  top:
+    type: RANKING_AMBIGUITY
+    description: "Ranking criteria for entities"
+    options:
+      - id: "by_spend"
+        label: "By total spend / revenue generated"
+        order_by: "SUM(total_amount) DESC"
+      - id: "by_orders"
+        label: "By count of placed orders"
+        order_by: "COUNT(order_id) DESC"
+
+  active_user:
+    type: TEMPORAL_BEHAVIORAL_AMBIGUITY
+    description: "Definition of user activity"
+    options:
+      - id: "status_active"
+        label: "Explicit account status = 'active'"
+        condition: "status = 'active'"
+      - id: "recent_order"
+        label: "Placed an order in the last 30 days"
+        condition: "last_login_date >= datetime('now', '-30 days')"
