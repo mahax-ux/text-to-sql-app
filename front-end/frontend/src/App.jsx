@@ -1,282 +1,259 @@
 import React, { useState } from 'react';
-import './App.css';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = 'https://text-to-sql-app-4t3e.onrender.com';
 
 export default function App() {
   const [query, setQuery] = useState('');
   const [sessionState, setSessionState] = useState(null);
   const [selections, setSelections] = useState({});
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const handleSubmitQuery = async (e) => {
     e.preventDefault();
     if (!query.trim()) return;
+
     setLoading(true);
+    setError(null);
     setSelections({});
+
     try {
-      const res = await fetch(`${API_BASE}/api/query`, {
+      const res = await fetch(`${API_BASE_URL}/api/query`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_query: query }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: query.trim(),
+          raw_query: query.trim(), // Sent to support both backend payload schemas
+        }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server responded with status ${res.status}`);
+      }
+
       const data = await res.json();
       setSessionState(data);
-      
+
+      // Auto-compile if the query has no ambiguities detected
       if (data.status === 'READY_TO_GENERATE') {
         compileSQL(data, []);
       }
     } catch (err) {
-      console.error("Query Error:", err);
+      console.error(err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleOptionSelect = (term, optionId) => {
-    setSelections({ ...selections, [term]: optionId });
+    setSelections((prev) => ({ ...prev, [term]: optionId }));
   };
 
-  const handleFinalSubmit = () => {
-    const formattedClarifications = Object.entries(selections).map(([term, selected_option_id]) => ({
-      term,
-      selected_option_id,
-    }));
+  const handleClarificationSubmit = () => {
+    const formattedClarifications = Object.entries(selections).map(
+      ([term, selected_option_id]) => ({
+        term,
+        selected_option_id,
+      })
+    );
     compileSQL(sessionState, formattedClarifications);
   };
 
   const compileSQL = async (stateObj, resolvedClarifications) => {
     setLoading(true);
+    setError(null);
+
     try {
-      const res = await fetch(`${API_BASE}/api/clarify-and-compile`, {
+      const res = await fetch(`${API_BASE_URL}/api/clarify-and-compile`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          session_id: stateObj?.session_id || "sess_default",
-          raw_query: stateObj?.raw_query || query,
-          resolved_clarifications: Array.isArray(resolvedClarifications) ? resolvedClarifications : [],
+          session_id: stateObj.session_id || 'web_session',
+          query: stateObj.raw_query || query.trim(),
+          raw_query: stateObj.raw_query || query.trim(),
+          resolved_clarifications: resolvedClarifications,
         }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server responded with status ${res.status}`);
+      }
+
       const data = await res.json();
       setSessionState(data);
     } catch (err) {
-      console.error("Compilation Error:", err);
+      console.error(err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="landing-container">
-      
-      {/* Top Navbar */}
-      <nav className="nav-bar">
-        <div className="brand">
-          <div className="brand-icon-box">
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <ellipse cx="12" cy="5" rx="8" ry="3" stroke="#00ff80" />
-              <path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5" stroke="#a1a1aa" />
-              <path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6" stroke="#a1a1aa" />
-              <path
-                d="M17 2l.8 2.2L20 5l-2.2.8L17 8l-.8-2.2L14 5l2.2-.8L17 2z"
-                fill="#00ff80"
-                stroke="#00ff80"
-                strokeWidth="0.8"
-                style={{ filter: 'drop-shadow(0 0 4px #00ff80)' }}
-              />
-            </svg>
-          </div>
-          <span className="brand-text">
-            Mahant <span className="brand-accent">AI</span>
-          </span>
-        </div>
-
-        <div className="nav-actions">
-          <div className="dev-badge">
-            <span className="live-dot" />
-            <span>Built by a <strong style={{ color: '#fff', fontWeight: 600 }}>BCA Student</strong></span>
-          </div>
-          <a
-            href="https://github.com"
-            target="_blank"
-            rel="noreferrer"
-            className="nav-btn"
-          >
-            Developer Profile ➔
-          </a>
-        </div>
-      </nav>
-
-      {/* Hero Content */}
-      <h1 className="hero-heading">Generate flawless SQL<br/>powered by AI</h1>
-      <p className="hero-subtitle">
-        Translate plain English into precise database queries. Let the AI clarify ambiguities and handle complex schemas while you focus on extracting insights.
+    <div style={{ maxWidth: '850px', margin: '40px auto', fontFamily: 'system-ui, sans-serif', padding: '0 20px' }}>
+      <h1 style={{ fontSize: '24px', marginBottom: '8px' }}>Text-to-SQL Clarification Engine</h1>
+      <p style={{ color: '#666', marginBottom: '24px' }}>
+        Translates ambiguous business queries into unambiguous SQLite queries.
       </p>
 
-      {/* Trust Badges */}
-      <button className="badge-btn">View Sandbox Schema ➔</button>
-      <div className="trust-section">
-        <span>High Precision Engine</span>
-        <div style={{ color: '#00ff66', letterSpacing: '2px' }}>
-          ★★★★★ <span style={{ color: '#fff', marginLeft: '4px' }}>99.9%</span>
+      {/* Input Form */}
+      <form onSubmit={handleSubmitQuery} style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="e.g. Show me top revenue for active users"
+          style={{
+            flex: 1,
+            padding: '12px 16px',
+            fontSize: '15px',
+            borderRadius: '6px',
+            border: '1px solid #ccc',
+            outline: 'none',
+          }}
+        />
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            padding: '12px 24px',
+            fontSize: '15px',
+            fontWeight: 600,
+            color: '#fff',
+            backgroundColor: loading ? '#888' : '#0070f3',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: loading ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {loading ? 'Processing...' : 'Run Query'}
+        </button>
+      </form>
+
+      {/* Error Banner */}
+      {error && (
+        <div style={{ padding: '12px 16px', background: '#ffeef0', color: '#b31d28', borderRadius: '6px', marginBottom: '20px' }}>
+          <strong>Error:</strong> {error}
         </div>
-      </div>
+      )}
 
-      {/* Interactive Engine Area */}
-      <div className="engine-container">
-        
-        {/* State 1: Input Box */}
-        {(!sessionState || sessionState.status === 'IDLE') && (
-          <>
-            <form className="prompt-box" onSubmit={handleSubmitQuery}>
-              <textarea
-                className="query-input"
-                rows="3"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Describe your data request (e.g., Show me top revenue for active users)..."
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSubmitQuery(e);
-                  }
-                }}
-              />
-              <div className="prompt-footer">
-                <div className="prompt-tools">
-                  <div className="tool-icon">🎙️</div>
-                  <div className="tool-icon">📎</div>
-                </div>
-                <button type="submit" className="submit-circle" disabled={loading || !query.trim()}>
-                  {loading ? '...' : '➔'}
-                </button>
-              </div>
-            </form>
-            
-            <div className="chip-container">
-              <span className="chip active">users</span>
-              <span className="chip">orders</span>
-              <span className="chip">products</span>
-              <span className="chip">categories</span>
-              <span className="chip">order_items</span>
-            </div>
-          </>
-        )}
-
-        {/* State 2: Clarification Panel */}
-        {sessionState?.status === 'NEEDS_CLARIFICATION' && (
-          <div className="prompt-box" style={{ padding: '30px' }}>
-            <h3 style={{ margin: '0 0 5px 0', color: 'var(--accent-green)' }}>Clarification Required</h3>
-            <p style={{ margin: '0 0 20px 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-              Resolve these ambiguities to generate exact SQL.
-            </p>
-            
-            {sessionState.detected_ambiguities.map((amb) => (
-              <div key={amb.term} className="clarify-group">
-                <p style={{ margin: '0 0 12px 0', fontWeight: '500' }}>{amb.question}</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {amb.options.map((opt) => (
-                    <label 
-                      key={opt.id} 
-                      className={`clarify-option ${selections[amb.term] === opt.id ? 'selected' : ''}`}
-                    >
-                      <input
-                        type="radio"
-                        name={amb.term}
-                        value={opt.id}
-                        checked={selections[amb.term] === opt.id}
-                        onChange={() => handleOptionSelect(amb.term, opt.id)}
-                        style={{ accentColor: '#00ff80' }}
-                      />
-                      <span style={{ fontSize: '0.9rem' }}>{opt.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ))}
-            
-            <button 
-              onClick={handleFinalSubmit} 
-              className="badge-btn" 
-              style={{ margin: '10px auto 0', display: 'flex' }} 
-              disabled={loading}
-            >
-              {loading ? 'Compiling...' : 'Confirm & Execute'}
-            </button>
-          </div>
-        )}
-
-        {/* State 3: Success Data View */}
-        {sessionState?.status === 'SUCCESS' && (
-          <div className="prompt-box results-box">
-            <div className="results-header">
-              <div>
-                <div className="status-tag">Query Executed</div>
-                <h3 className="query-title">"{sessionState.raw_query}"</h3>
-              </div>
-              <button 
-                onClick={() => { setSessionState(null); setQuery(''); }} 
-                className="reset-btn"
-              >
-                Start Over
-              </button>
-            </div>
-
-            {/* Generated SQL */}
-            <div className="section-wrapper">
-              <span className="section-label">Generated SQL</span>
-              <div className="sql-block">
-                <code>{sessionState.generated_sql}</code>
+      {/* Clarification Options Screen */}
+      {sessionState?.status === 'NEEDS_CLARIFICATION' && (
+        <div style={{ background: '#f6f8fa', border: '1px solid #d0d7de', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
+          <h3 style={{ marginTop: 0, marginBottom: '16px', fontSize: '18px' }}>Clarification Needed</h3>
+          {sessionState.detected_ambiguities?.map((amb, idx) => (
+            <div key={amb.term || idx} style={{ marginBottom: '20px' }}>
+              <p style={{ fontWeight: 600, marginBottom: '8px' }}>{amb.question}</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {amb.options?.map((opt) => (
+                  <label
+                    key={opt.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: 'pointer',
+                      padding: '8px 12px',
+                      borderRadius: '4px',
+                      border: '1px solid #e1e4e8',
+                      background: selections[amb.term] === opt.id ? '#e7f3ff' : '#fff',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name={amb.term}
+                      value={opt.id}
+                      checked={selections[amb.term] === opt.id}
+                      onChange={() => handleOptionSelect(amb.term, opt.id)}
+                    />
+                    <span>
+                      <strong>{opt.label}</strong>
+                      {opt.sql_snippet && (
+                        <code style={{ marginLeft: '8px', fontSize: '12px', color: '#555' }}>
+                          ({opt.sql_snippet})
+                        </code>
+                      )}
+                    </span>
+                  </label>
+                ))}
               </div>
             </div>
+          ))}
 
-            {/* Data Preview Table */}
-            <div className="section-wrapper">
-              <span className="section-label">
-                Data Preview ({sessionState.query_results?.length || 0} rows)
-              </span>
-              <div className="data-table-container">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      {sessionState.query_results?.[0] && Object.keys(sessionState.query_results[0]).map((key) => (
-                        <th key={key}>{key}</th>
+          <button
+            onClick={handleClarificationSubmit}
+            disabled={loading || Object.keys(selections).length === 0}
+            style={{
+              padding: '10px 20px',
+              fontSize: '14px',
+              fontWeight: 600,
+              backgroundColor: '#2ea44f',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {loading ? 'Compiling...' : 'Confirm Choices & Generate SQL'}
+          </button>
+        </div>
+      )}
+
+      {/* SQL & Execution Results */}
+      {sessionState?.status === 'SUCCESS' && (
+        <div>
+          <h3 style={{ marginBottom: '8px' }}>Generated SQL Query</h3>
+          <pre
+            style={{
+              background: '#0d1117',
+              color: '#58a6ff',
+              padding: '16px',
+              borderRadius: '6px',
+              overflowX: 'auto',
+              fontSize: '14px',
+            }}
+          >
+            {sessionState.generated_sql}
+          </pre>
+
+          <h3 style={{ marginTop: '24px', marginBottom: '8px' }}>Results</h3>
+          {sessionState.query_results && sessionState.query_results.length > 0 ? (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                <thead>
+                  <tr style={{ background: '#f6f8fa', borderBottom: '2px solid #d0d7de' }}>
+                    {Object.keys(sessionState.query_results[0]).map((key) => (
+                      <th key={key} style={{ textAlign: 'left', padding: '10px' }}>
+                        {key}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessionState.query_results.map((row, rowIdx) => (
+                    <tr key={rowIdx} style={{ borderBottom: '1px solid #e1e4e8' }}>
+                      {Object.values(row).map((val, cellIdx) => (
+                        <td key={cellIdx} style={{ padding: '10px' }}>
+                          {val !== null ? String(val) : 'NULL'}
+                        </td>
                       ))}
                     </tr>
-                  </thead>
-                  <tbody>
-                    {sessionState.query_results?.length > 0 ? (
-                      sessionState.query_results.map((row, idx) => (
-                        <tr key={idx}>
-                          {Object.values(row).map((val, i) => (
-                            <td key={i}>{String(val ?? '')}</td>
-                          ))}
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan="100%" style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
-                          No records returned.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
-        )}
-
-      </div>
+          ) : (
+            <p style={{ color: '#666', fontStyle: 'italic' }}>Query executed successfully but returned 0 rows.</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
