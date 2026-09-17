@@ -187,7 +187,7 @@ export default function App() {
               <span>Built by a <strong style={{ color: '#fff', fontWeight: 600 }}>BCA Student</strong></span>
             </div>
             <a
-              href="https://github.com"
+              href="https://github.com/mahax-ux"
               target="_blank"
               rel="noreferrer"
               className="nav-btn"
