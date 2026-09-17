@@ -2,8 +2,8 @@ import os
 import sys
 import uuid
 import traceback
-from typing import Dict, Any, List, Optional
-from fastapi import FastAPI, HTTPException, Request
+from typing import Dict, Any, List
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -14,7 +14,6 @@ try:
         EngineSessionState,
         UserClarificationResponse,
         ExecutionStatus,
-        ClarificationQuestion,
     )
     from src.detector import AmbiguityDetector
     from src.sql_compiler import SQLCompiler
@@ -25,21 +24,34 @@ except Exception as e:
 
 app = FastAPI(title="Text-to-SQL Clarification Engine API")
 
-# Enable permissive CORS for local testing and deployed frontends
+# Explicit CORS settings for production & local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://text-to-sql-app.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "*",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
-# In-memory session store
 sessions: Dict[str, EngineSessionState] = {}
-
-# Initialize engine services
 detector = AmbiguityDetector()
 compiler = SQLCompiler()
+
+
+@app.options("/{full_path:path}")
+async def options_preflight_handler(full_path: str):
+    """Explicit preflight handler to prevent proxy CORS drops."""
+    response = Response(status_code=200)
+    response.headers["Access-Control-Allow-Origin"] = "https://text-to-sql-app.vercel.app"
+    response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
 
 @app.get("/")
@@ -49,13 +61,11 @@ def root():
 
 @app.post("/api/query")
 async def submit_query(request: Request):
-    """Dynamically accepts any incoming JSON payload structure from the frontend."""
     try:
         data = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body received.")
 
-    # Extract user input regardless of which key the frontend uses
     raw_text = (
         data.get("query")
         or data.get("user_query")
@@ -72,7 +82,7 @@ async def submit_query(request: Request):
     if not raw_text:
         raise HTTPException(
             status_code=400,
-            detail=f"No query string found. Received payload keys: {list(data.keys())}"
+            detail=f"No query string found. Received payload keys: {list(data.keys())}",
         )
 
     session_id = data.get("session_id") or str(uuid.uuid4())
@@ -80,14 +90,12 @@ async def submit_query(request: Request):
     try:
         session_state = EngineSessionState(
             session_id=session_id,
-            raw_query=raw_text
+            raw_query=raw_text,
         )
 
-        # Step 1: Detect ambiguities
         session_state = detector.analyze(session_state)
         sessions[session_id] = session_state
 
-        # Step 2: Auto-compile if query is completely unambiguous
         if session_state.status == ExecutionStatus.READY_TO_GENERATE:
             session_state = compiler.compile_and_execute(session_state)
             sessions[session_id] = session_state
@@ -101,7 +109,6 @@ async def submit_query(request: Request):
 
 @app.post("/api/clarify")
 async def clarify_query(request: Request):
-    """Dynamically parses clarification answers and compiles the final query."""
     try:
         data = await request.json()
     except Exception:
@@ -122,7 +129,7 @@ async def clarify_query(request: Request):
                 resolved_responses.append(
                     UserClarificationResponse(
                         term=term,
-                        selected_option_id=option_id
+                        selected_option_id=option_id,
                     )
                 )
 
@@ -130,7 +137,6 @@ async def clarify_query(request: Request):
         session_state = sessions[session_id]
         session_state.resolved_clarifications = resolved_responses
 
-        # Compile and run SQL
         session_state = compiler.compile_and_execute(session_state)
         sessions[session_id] = session_state
 
